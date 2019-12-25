@@ -120,7 +120,8 @@ import           Data.Maybe                     (fromMaybe, isNothing)
 import           Data.Semigroup
 import qualified Data.String                    as S
 import qualified Data.Text                      as T
-import qualified Data.Text.Encoding             as T
+import qualified Data.Text.Array                as TA
+import qualified Data.Text.Internal             as T
 import           Foreign.C
 import           GHC.Base                       (assert, unsafeChr)
 import qualified GHC.CString                    as GHC
@@ -627,18 +628,16 @@ foldr1 f st
 
     !sz = toB st
 
--- | \(\mathcal{O}(n)\) Convert to 'T.Text'
+-- | \(\mathcal{O}(1)\) Convert to 'T.Text'
 --
 -- prop> (fromText . toText) t == t
 --
 -- prop> (toText . fromText) t == t
 --
--- This is currently not \(\mathcal{O}(1)\) because currently 'T.Text' uses UTF-16 as its internal representation.
--- In the event that 'T.Text' will change its internal representation to UTF-8 this operation will become \(\mathcal{O}(1)\).
---
 -- @since 0.1
 toText :: ShortText -> T.Text
-toText = T.decodeUtf8 . toByteString
+toText = flip T.Text 0 <$> toArray <*> toLength
+  where toArray st = TA.Array (toByteArray# st)
 
 ----
 
@@ -666,12 +665,11 @@ fromString s = ShortText . encodeStringShort utf8 . map r $ s
 
 -- | \(\mathcal{O}(n)\) Construct 'ShortText' from 'T.Text'
 --
--- This is currently not \(\mathcal{O}(1)\) because currently 'T.Text' uses UTF-16 as its internal representation.
--- In the event that 'T.Text' will change its internal representation to UTF-8 this operation will become \(\mathcal{O}(1)\).
---
 -- @since 0.1
 fromText :: T.Text -> ShortText
-fromText = fromByteStringUnsafe . T.encodeUtf8
+fromText (T.Text (TA.Array ba#) k@(I# k#) l@(I# l#))
+  | 0 <- k, I# (GHC.Exts.sizeofByteArray# ba#) == l = ShortText (BSSI.SBS ba#)
+  | otherwise = create (B l) $ \ (MBA# mba#) -> ST (\ st# -> (# GHC.Exts.copyByteArray# ba# k# mba# 0# l# st#, () #))
 
 -- | \(\mathcal{O}(n)\) Construct 'ShortText' from UTF-8 encoded 'ShortByteString'
 --
